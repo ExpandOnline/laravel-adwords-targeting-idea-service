@@ -20,15 +20,22 @@
     ],
     "require": {
         "php": "^7.3|^8.0",
-        "laravel/framework": "^8.0",
+        "googleads/google-ads-php": "^17.1",
         "googleads/googleads-php-lib": "^52.0",
-        "schulzefelix/laravel-data-transfer-object": "^1.4.0"
+        "laravel/framework": "^8.0",
+        "schulzefelix/laravel-data-transfer-object": "dev-google_ads"
     },
     "require-dev": {
         "mockery/mockery": "^1.4.2",
         "orchestra/testbench": "^5.0|^6.0",
         "phpunit/phpunit" : "^8.0|^9.0"
     },
+    "repositories": [
+        {
+            "url": "https://github.com/ExpandOnline/laravel-data-transfer-object.git",
+            "type": "git"
+        }
+    ],
     "autoload": {
         "psr-4": {
             "SchulzeFelix\\AdWords\\": "src"

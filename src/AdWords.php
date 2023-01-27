@@ -2,10 +2,8 @@
 
 namespace SchulzeFelix\AdWords;
 
-use Google\AdsApi\AdWords\v201809\o\AttributeType;
-use Google\AdsApi\AdWords\v201809\o\RequestType;
-use Google\AdsApi\AdWords\v201809\o\TargetingIdeaService;
-use Google\AdsApi\Common\Util\MapEntries;
+use Google\Ads\GoogleAds\V12\Services\GenerateKeywordIdeaResult;
+use Google\Ads\GoogleAds\V12\Services\KeywordPlanIdeaServiceClient;
 use Illuminate\Support\Collection;
 use SchulzeFelix\AdWords\Responses\Keyword;
 use SchulzeFelix\AdWords\Responses\MonthlySearchVolume;
@@ -15,7 +13,7 @@ class AdWords
     const CHUNK_SIZE = 700;
 
     /**
-     * @var TargetingIdeaService
+     * @var AdWordsService
      */
     private $service;
 
@@ -55,19 +53,11 @@ class AdWords
     public function searchVolumes(array $keywords)
     {
         $keywords = $this->prepareKeywords($keywords);
-        $requestType = RequestType::STATS;
 
-        $searchVolumes = new Collection();
         $chunks = array_chunk($keywords, self::CHUNK_SIZE);
 
         foreach ($chunks as $index => $keywordChunk) {
-            $results = $this->service->performQuery($keywordChunk, $requestType, $this->language, $this->location, $this->withTargetedMonthlySearches);
-            if ($results->getEntries() !== null) {
-                foreach ($results->getEntries() as $targetingIdea) {
-                    $keyword = $this->extractKeyword($targetingIdea);
-                    $searchVolumes->push($keyword);
-                }
-            }
+            $searchVolumes = $this->service->performSearchVolumeQuery($keywordChunk, null, $this->language, $this->location, $this->withTargetedMonthlySearches);
         }
 
         $missingKeywords = array_diff($keywords, $searchVolumes->pluck('keyword')->toArray());
@@ -98,11 +88,9 @@ class AdWords
         $keywordIdeas = new Collection();
 
         $results = $this->service->performQuery($keyword, $requestType, $this->language, $this->location, $this->withTargetedMonthlySearches, $this->include, $this->exclude);
-        if ($results->getEntries() !== null) {
-            foreach ($results->getEntries() as $targetingIdea) {
-                $keyword = $this->extractKeyword($targetingIdea);
-                $keywordIdeas->push($keyword);
-            }
+        foreach ($results->iterateAllElements() as $result) {
+            $keyword = $this->extractKeyword($result);
+            $keywordIdeas->push($keyword);
         }
 
         return $keywordIdeas;
@@ -171,9 +159,9 @@ class AdWords
     }
 
     /**
-     * @return TargetingIdeaService
+     * @return KeywordPlanIdeaServiceClient
      */
-    public function getTargetingIdeaService(): TargetingIdeaService
+    public function getTargetingIdeaService(): KeywordPlanIdeaServiceClient
     {
         return $this->service->getTargetingIdeaService();
     }
@@ -193,47 +181,44 @@ class AdWords
     }
 
     /**
-     * @param $targetingIdea
+     * @param GenerateKeywordIdeaResult $targetingIdea
      *
      * @return Keyword
      */
     private function extractKeyword($targetingIdea)
     {
-        $data = MapEntries::toAssociativeArray($targetingIdea->getData());
-        $keyword = $data[AttributeType::KEYWORD_TEXT]->getValue();
-        $search_volume =
-            ($data[AttributeType::SEARCH_VOLUME]->getValue() !== null)
-                ? $data[AttributeType::SEARCH_VOLUME]->getValue() : 0;
+        $keywordData = [
+            'keyword' => $targetingIdea->getText(),
+            'search_volume' => 0,
+            'cpc' => 0,
+            'competition' => 0,
+            'targeted_monthly_searches' => null
+        ];
 
-        $average_cpc =
-            ($data[AttributeType::AVERAGE_CPC]->getValue() !== null)
-                ? $data[AttributeType::AVERAGE_CPC]->getValue()->getMicroAmount() : 0;
-        $competition =
-            ($data[AttributeType::COMPETITION]->getValue() !== null)
-                ? $data[AttributeType::COMPETITION]->getValue() : 0;
+        $hasMetrics = !is_null($targetingIdea->getKeywordIdeaMetrics());
 
-        $result = new Keyword([
-            'keyword'                   => $keyword,
-            'search_volume'             => $search_volume,
-            'cpc'                       => $average_cpc,
-            'competition'               => $competition,
-            'targeted_monthly_searches' => null,
-        ]);
+        if ($hasMetrics) {
+            $keywordData['search_volume'] =  $targetingIdea->getKeywordIdeaMetrics()->getAvgMonthlySearches();
+            $keywordData['cpc'] = $targetingIdea->getKeywordIdeaMetrics()->getAverageCpcMicros();
+            $keywordData['competition'] = $targetingIdea->getKeywordIdeaMetrics()->getCompetition();
+        }
 
-        if ($this->withTargetedMonthlySearches) {
-            $targeted_monthly_searches =
-                ($data[AttributeType::TARGETED_MONTHLY_SEARCHES]->getValue() !== null)
-                    ? $data[AttributeType::TARGETED_MONTHLY_SEARCHES]->getValue() : 0;
-            $targetedMonthlySearches = collect($targeted_monthly_searches)
-                ->transform(function ($item, $key) {
-                    return new MonthlySearchVolume([
-                        'year'  => $item->getYear(),
-                        'month' => $item->getMonth(),
-                        'count' => $item->getCount(),
-                    ]);
-                });
+        $result = new Keyword($keywordData);
 
-            $result->targeted_monthly_searches = $targetedMonthlySearches;
+        if ($this->withTargetedMonthlySearches && $hasMetrics) {
+            $targeted_monthly_searches = $targetingIdea->getKeywordIdeaMetrics()->getMonthlySearchVolumes();
+
+            $result->targeted_monthly_searches = [];
+            /**
+             * @var \Google\Ads\GoogleAds\V12\Common\MonthlySearchVolume $monthly_search
+             */
+            foreach ($targeted_monthly_searches as $monthly_search) {
+                $result->targeted_monthly_searches[] = new MonthlySearchVolume([
+                    'year'  => $monthly_search->getYear(),
+                    'month' => $monthly_search->getMonth(),
+                    'count' => $monthly_search->getMonthlySearches(),
+                ]);
+            }
         }
 
         return $result;

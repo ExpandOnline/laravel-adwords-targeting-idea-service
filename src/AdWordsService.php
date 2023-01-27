@@ -2,33 +2,26 @@
 
 namespace SchulzeFelix\AdWords;
 
+use Google\Ads\GoogleAds\Lib\V12\GoogleAdsClient;
+use Google\Ads\GoogleAds\Util\V12\ResourceNames;
+use Google\Ads\GoogleAds\V12\Enums\KeywordPlanNetworkEnum\KeywordPlanNetwork;
+use Google\Ads\GoogleAds\V12\Services\KeywordSeed;
 use Google\AdsApi\AdWords\v201809\cm\ApiException;
-use Google\AdsApi\AdWords\v201809\cm\Language;
-use Google\AdsApi\AdWords\v201809\cm\Location;
-use Google\AdsApi\AdWords\v201809\cm\NetworkSetting;
-use Google\AdsApi\AdWords\v201809\cm\Paging;
-use Google\AdsApi\AdWords\v201809\o\AttributeType;
-use Google\AdsApi\AdWords\v201809\o\IdeaTextFilterSearchParameter;
-use Google\AdsApi\AdWords\v201809\o\IdeaType;
-use Google\AdsApi\AdWords\v201809\o\LanguageSearchParameter;
-use Google\AdsApi\AdWords\v201809\o\LocationSearchParameter;
-use Google\AdsApi\AdWords\v201809\o\NetworkSearchParameter;
-use Google\AdsApi\AdWords\v201809\o\RelatedToQuerySearchParameter;
-use Google\AdsApi\AdWords\v201809\o\TargetingIdeaSelector;
-use Google\AdsApi\AdWords\v201809\o\TargetingIdeaService;
+use Google\ApiCore\PagedListResponse;
 
 class AdWordsService
 {
-    const PAGE_LIMIT = 700;
-
     const MAX_RETRIES = 10;
 
-    /** @var TargetingIdeaService */
-    protected $targetingIdeaService;
+    /** @var GoogleAdsClient */
+    protected $adsClient;
 
-    public function __construct(TargetingIdeaService $targetingIdeaService)
+    protected $customerId;
+
+    public function __construct(GoogleAdsClient $adsClient, $customerId)
     {
-        $this->targetingIdeaService = $targetingIdeaService;
+        $this->adsClient = $adsClient;
+        $this->customerId = $customerId;
     }
 
     /**
@@ -44,115 +37,39 @@ class AdWordsService
      *
      * @throws ApiException
      *
-     * @return \Google\AdsApi\AdWords\v201809\o\TargetingIdeaPage
+     * @return PagedListResponse
      */
-    public function performQuery(array $keywords, $requestType, $language = null, $location = null, $withTargetedMonthlySearches = false, $included = null, $excluded = null)
+    public function performQuery(array $keywords, $requestType = null, $language = null, $location = null, $withTargetedMonthlySearches = false, $included = [], $excluded = [])
     {
+        $query = [
+            'keywords' => new KeywordSeed((['keywords' => $keywords])),
+            'keywordPlanNetwork' => KeywordPlanNetwork::GOOGLE_SEARCH_AND_PARTNERS
+        ];
 
-        // Create selector.
-        $selector = new TargetingIdeaSelector();
-        $selector->setRequestType($requestType);
-        $selector->setIdeaType(IdeaType::KEYWORD);
-        $selector->setRequestedAttributeTypes($this->getRequestedAttributeTypes($withTargetedMonthlySearches));
-        $selector->setPaging(new Paging(0, self::PAGE_LIMIT));
-        $selector->setSearchParameters($this->getSearchParameters($keywords, $language, $location, $included, $excluded));
+        if ($language !== null) {
+            $query['language'] = ResourceNames::forLanguageConstant($language);
+        }
 
-        return (new ExponentialBackoff(10))->execute(function () use ($selector) {
-            return $this->targetingIdeaService->get($selector);
+        if ($location !== null) {
+            $query['geoTargetConstants'] = [ResourceNames::forGeoTargetConstant($location)];
+        }
+
+        return (new ExponentialBackoff(10))->execute(function () use ($query) {
+            return $this->adsClient->getKeywordPlanIdeaServiceClient()->generateKeywordIdeas($query);
         });
     }
 
+    public function performSearchVolumeQuery(array $keywords, $requestType = null, $language = null, $location = null, $withTargetedMonthlySearches = false, $included = [], $excluded = []) {
+        $planner = new KeywordPlanner();
+        return $planner->getSearchVolume($this->adsClient, $this->customerId, array_merge($keywords, $included), $language, $location, $excluded);
+
+    }
+
     /**
-     * @return TargetingIdeaService
+     * @return GoogleAdsClient
      */
     public function getTargetingIdeaService()
     {
-        return $this->targetingIdeaService;
-    }
-
-    /**
-     * @param bool $withTargetedMonthlySearches
-     *
-     * @return array
-     */
-    private function getRequestedAttributeTypes($withTargetedMonthlySearches = false)
-    {
-        if ($withTargetedMonthlySearches) {
-            return [
-                AttributeType::KEYWORD_TEXT,
-                AttributeType::SEARCH_VOLUME,
-                AttributeType::COMPETITION,
-                AttributeType::AVERAGE_CPC,
-                AttributeType::TARGETED_MONTHLY_SEARCHES,
-            ];
-        }
-
-        return [
-            AttributeType::KEYWORD_TEXT,
-            AttributeType::SEARCH_VOLUME,
-            AttributeType::COMPETITION,
-            AttributeType::AVERAGE_CPC,
-        ];
-    }
-
-    /**
-     * @param array $keywords
-     * @param $languageId
-     * @param $locationId
-     * @param $included
-     * @param $excluded
-     *
-     * @return array
-     */
-    private function getSearchParameters(array $keywords, $languageId, $locationId, $included, $excluded)
-    {
-        $searchParameters = [];
-
-        //Create Language Parameter
-        if (! is_null($languageId)) {
-            $languageParameter = new LanguageSearchParameter();
-            $language = new Language();
-            $language->setId($languageId);
-            $languageParameter->setLanguages([$language]);
-            $searchParameters[] = $languageParameter;
-        }
-
-        //Create Location Parameter
-        if (! is_null($locationId)) {
-            $locationParameter = new LocationSearchParameter();
-            $location = new Location();
-            $location->setId($locationId);
-            $locationParameter->setLocations([$location]);
-            $searchParameters[] = $locationParameter;
-        }
-
-        //Network Settings
-        $networkSetting = new NetworkSetting();
-        $networkSetting->setTargetGoogleSearch(true);
-        $networkSetting->setTargetSearchNetwork(false);
-        $networkSetting->setTargetContentNetwork(false);
-        $networkSetting->setTargetPartnerSearchNetwork(false);
-
-        $networkSearchParameter = new NetworkSearchParameter();
-        $networkSearchParameter->setNetworkSetting($networkSetting);
-        $searchParameters[] = $networkSearchParameter;
-
-        // Create related to query search parameter.
-        $relatedToQuerySearchParameter = new RelatedToQuerySearchParameter();
-        $relatedToQuerySearchParameter->setQueries($keywords);
-        $searchParameters[] = $relatedToQuerySearchParameter;
-
-        if (! is_null($included) || ! is_null($excluded)) {
-            $ideaTextFilterSearchParameter = new IdeaTextFilterSearchParameter();
-            if (! is_null($included)) {
-                $ideaTextFilterSearchParameter->setIncluded($included);
-            }
-            if (! is_null($excluded)) {
-                $ideaTextFilterSearchParameter->setExcluded($excluded);
-            }
-            $searchParameters[] = $ideaTextFilterSearchParameter;
-        }
-
-        return $searchParameters;
+        return $this->adsClient;
     }
 }
