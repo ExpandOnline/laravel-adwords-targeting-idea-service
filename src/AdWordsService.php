@@ -42,8 +42,9 @@ class AdWordsService
     public function performQuery(array $keywords, $requestType = null, $language = null, $location = null, $withTargetedMonthlySearches = false, $included = [], $excluded = [])
     {
         $query = [
-            'keywords' => new KeywordSeed((['keywords' => $keywords])),
-            'keywordPlanNetwork' => KeywordPlanNetwork::GOOGLE_SEARCH_AND_PARTNERS
+            'keywordSeed' => new KeywordSeed((['keywords' => $keywords])),
+            'keywordPlanNetwork' => KeywordPlanNetwork::GOOGLE_SEARCH_AND_PARTNERS,
+            'customerId' => $this->customerId
         ];
 
         if ($language !== null) {
@@ -54,9 +55,9 @@ class AdWordsService
             $query['geoTargetConstants'] = [ResourceNames::forGeoTargetConstant($location)];
         }
 
-        return (new ExponentialBackoff(10))->execute(function () use ($query) {
-            return $this->adsClient->getKeywordPlanIdeaServiceClient()->generateKeywordIdeas($query);
-        });
+        #return (new ExponentialBackoff(10))->execute(function () use ($query) {
+        return $this->adsClient->getKeywordPlanIdeaServiceClient()->generateKeywordIdeas($query);
+        #});
     }
 
     public function performSearchVolumeQuery(array $keywords, $requestType = null, $language = null, $location = null, $withTargetedMonthlySearches = false, $included = [], $excluded = []) {

@@ -83,7 +83,7 @@ class AdWords
     public function keywordIdeas($keyword)
     {
         $keyword = $this->prepareKeywords([$keyword]);
-        $requestType = RequestType::IDEAS;
+        $requestType = '';
 
         $keywordIdeas = new Collection();
 

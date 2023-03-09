@@ -6,6 +6,7 @@ namespace SchulzeFelix\AdWords;
 
 use Google\Ads\GoogleAds\Lib\V12\GoogleAdsClient;
 use Google\Ads\GoogleAds\Util\V12\ResourceNames;
+use Google\Ads\GoogleAds\V12\Common\HistoricalMetricsOptions;
 use Google\Ads\GoogleAds\V12\Enums\KeywordMatchTypeEnum\KeywordMatchType;
 use Google\Ads\GoogleAds\V12\Enums\KeywordPlanForecastIntervalEnum\KeywordPlanForecastInterval;
 use Google\Ads\GoogleAds\V12\Enums\KeywordPlanNetworkEnum\KeywordPlanNetwork;
@@ -17,7 +18,6 @@ use Google\Ads\GoogleAds\V12\Resources\KeywordPlanForecastPeriod;
 use Google\Ads\GoogleAds\V12\Resources\KeywordPlanGeoTarget;
 use Google\Ads\GoogleAds\V12\Services\KeywordPlanAdGroupKeywordOperation;
 use Google\Ads\GoogleAds\V12\Services\KeywordPlanAdGroupOperation;
-use Google\Ads\GoogleAds\V12\Services\KeywordPlanCampaignKeywordOperation;
 use Google\Ads\GoogleAds\V12\Services\KeywordPlanCampaignOperation;
 use Google\Ads\GoogleAds\V12\Services\KeywordPlanKeywordHistoricalMetrics;
 use Google\Ads\GoogleAds\V12\Services\KeywordPlanOperation;
@@ -27,6 +27,13 @@ use SchulzeFelix\AdWords\Responses\MonthlySearchVolume;
 
 class KeywordPlanner
 {
+
+    const COMPETITION_VALUES = [
+        2 => 'Low',
+        3 => 'Medium',
+        4 => 'High'
+    ];
+
     public function getSearchVolume(GoogleAdsClient  $adsClient, $customerId, $keywords, $language, $location, $excluded) {
 
         $keywordPlan = $this->createKeywordPlan($adsClient, $customerId);
@@ -37,11 +44,17 @@ class KeywordPlanner
         if (!empty($excluded))
             $this->createNegativeKeywordPlan($adsClient, $customerId, $campaignPlan, $excluded);
 
-        $response = $adsClient->getKeywordPlanServiceClient()->generateHistoricalMetrics($keywordPlan);
+        $a = new HistoricalMetricsOptions();
+        $a->setIncludeAverageCpc(true);
+        $response = $adsClient->getKeywordPlanServiceClient()->generateHistoricalMetrics($keywordPlan, [$a]);
         $keywordIdeas = new Collection();
         foreach($response->getMetrics() as $item) {
-            $keywordIdeas->push($this->extractKeyword($item));
+            $keywordIdeas->push($this->extractKeyword($item, true));
         }
+
+        $delete = new KeywordPlanOperation();
+        $delete->setRemove($keywordPlan);
+        $adsClient->getKeywordPlanServiceClient()->mutateKeywordPlans($customerId, [$delete]);
 
         return $keywordIdeas;
     }
@@ -195,7 +208,7 @@ class KeywordPlanner
             'search_volume' => 0,
             'cpc' => 0,
             'competition' => 0,
-            'targeted_monthly_searches' => null
+            'targeted_monthly_searches' => []
         ];
 
         $hasMetrics = !is_null($item->getKeywordMetrics());
@@ -203,12 +216,17 @@ class KeywordPlanner
         if ($hasMetrics) {
             $keywordData['search_volume'] =  $item->getKeywordMetrics()->getAvgMonthlySearches();
             $keywordData['cpc'] = $item->getKeywordMetrics()->getAverageCpcMicros();
-            $keywordData['competition'] = $item->getKeywordMetrics()->getCompetition();
+
+            $competition = $item->getKeywordMetrics()->getCompetition();
+            if (array_key_exists($competition, KeywordPlanner::COMPETITION_VALUES)) {
+                $competition = KeywordPlanner::COMPETITION_VALUES[$competition];
+            }
+            $keywordData['competition'] = $competition;
         }
 
         $result = new Keyword($keywordData);
 
-        if ($withTargetedMonthlySearches && $hasMetrics) {
+        if ($hasMetrics) {
             $targeted_monthly_searches = $item->getKeywordMetrics()->getMonthlySearchVolumes();
 
             $result->targeted_monthly_searches = [];
