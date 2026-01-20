@@ -10,7 +10,10 @@ class Keyword extends DataTransferObject
         'keyword'                   => 'string',
         'search_volume'             => 'integer',
         'cpc'                       => 'float',
-        'competition'               => 'float',
+        'competition'               => 'string',
         'targeted_monthly_searches' => 'collection',
-    ];
+        'high_top_of_page_bid' => 'float',
+	'low_top_of_page_bid' => 'float'
+   ];
 }
+

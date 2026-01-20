@@ -46,7 +46,7 @@ class KeywordPlanner
 
         $a = new HistoricalMetricsOptions();
         $a->setIncludeAverageCpc(true);
-        $response = $adsClient->getKeywordPlanServiceClient()->generateHistoricalMetrics($keywordPlan, [$a]);
+        $response = $adsClient->getKeywordPlanServiceClient()->generateHistoricalMetrics($keywordPlan, ['historicalMetricsOptions' => $a]);
         $keywordIdeas = new Collection();
         foreach($response->getMetrics() as $item) {
             $keywordIdeas->push($this->extractKeyword($item, true));
@@ -221,7 +221,10 @@ class KeywordPlanner
             if (array_key_exists($competition, KeywordPlanner::COMPETITION_VALUES)) {
                 $competition = KeywordPlanner::COMPETITION_VALUES[$competition];
             }
-            $keywordData['competition'] = $competition;
+	    $keywordData['competition'] = $competition;
+
+	    $keywordData['low_top_of_page_bid'] = $item->getKeywordMetrics()->getLowTopOfPageBidMicros();
+	    $keywordData['high_top_of_page_bid'] = $item->getKeywordMetrics()->getHighTopOfPageBidMicros(); 
         }
 
         $result = new Keyword($keywordData);
@@ -229,19 +232,22 @@ class KeywordPlanner
         if ($hasMetrics) {
             $targeted_monthly_searches = $item->getKeywordMetrics()->getMonthlySearchVolumes();
 
+	    $a = [];
             $result->targeted_monthly_searches = [];
             /**
              * @var \Google\Ads\GoogleAds\V12\Common\MonthlySearchVolume $monthly_search
              */
             foreach ($targeted_monthly_searches as $monthly_search) {
-                $result->targeted_monthly_searches[] = new MonthlySearchVolume([
-                    'year'  => $monthly_search->getYear(),
+		 $a[] = (new MonthlySearchVolume([
+		    'year'  => $monthly_search->getYear(),
                     'month' => $monthly_search->getMonth(),
                     'count' => $monthly_search->getMonthlySearches(),
-                ]);
-            }
+                ]));
+	    }
+	    $result->targeted_monthly_searches = $a;
         }
 
         return $result;
     }
 }
+
